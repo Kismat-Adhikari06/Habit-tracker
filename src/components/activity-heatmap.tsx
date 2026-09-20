@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { AggregatedHeatmap } from "@/lib/habits";
 
@@ -28,6 +28,34 @@ function cellOpacity(level: number) {
   return level === 0 ? 0 : 0.25 + level * 0.19;
 }
 
+/**
+ * On narrow screens, shrink cells (and drop trailing columns) so the yearly
+ * grid fits without horizontal overflow. Desktop is unaffected.
+ */
+function useResponsiveCellSize(isYearly: boolean, columnCount: number) {
+  const [size, setSize] = useState(isYearly ? 11 : isDailySizeFallback());
+
+  useEffect(() => {
+    if (!isYearly) return;
+    const compute = () => {
+      // Measure the actual container width via the viewport (card ~= viewport - padding on phones)
+      const available = Math.min(document.documentElement.clientWidth, 1152) - 48; // page padding
+      const mobileAllowance = document.documentElement.clientWidth < 640 ? 76 : 0; // room for stats/legend on phones
+      const fitting = Math.floor((available - mobileAllowance - (columnCount - 1) * GAP) / columnCount);
+      setSize(Math.max(5, Math.min(11, fitting)));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [isYearly, columnCount]);
+
+  return size;
+}
+
+function isDailySizeFallback() {
+  return typeof window !== "undefined" && window.innerWidth < 640 ? 14 : 18;
+}
+
 export function ActivityHeatmap({ data, color, unit, className }: Props) {
   const isYearly = data.mode === "yearly";
   const isDaily = data.mode === "daily";
@@ -49,8 +77,8 @@ export function ActivityHeatmap({ data, color, unit, className }: Props) {
   const labels = isYearly ? yearlyLabels.map((l) => l.label) : data.labels;
 
   const showLabelsRow = !isDaily;
-  // Daily: label under the row; yearly/weekly: labels on top.
-  const cellSize = isYearly ? 11 : isDaily ? 18 : 22;
+  const baseCellSize = isYearly ? 11 : isDaily ? 18 : 22;
+  const cellSize = useResponsiveCellSize(isYearly, data.columns.length) || baseCellSize;
 
   return (
     <div className={cn("flex min-w-0 flex-col gap-[3px]", className)}>
@@ -79,6 +107,7 @@ export function ActivityHeatmap({ data, color, unit, className }: Props) {
                 style={{
                   width: cellSize,
                   height: cellSize,
+                  minWidth: 0,
                   backgroundColor:
                     day.level === 0
                       ? "rgba(255,255,255,0.055)"

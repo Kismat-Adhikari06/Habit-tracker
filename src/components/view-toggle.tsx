@@ -34,7 +34,7 @@ export function ViewToggle({ value, onChange, className }: Props) {
             aria-selected={active}
             onClick={() => onChange(mode.value)}
             className={cn(
-              "rounded-full px-3.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-600",
+              "min-h-[36px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-600",
               active
                 ? "bg-neutral-100 text-neutral-900 shadow-sm"
                 : "text-neutral-400 hover:text-neutral-200"

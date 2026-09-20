@@ -12,7 +12,7 @@ export function NewHabitButton({ onClick }: Props) {
     <Button
       size="icon"
       onClick={onClick}
-      className="fixed right-8 bottom-8 z-50 size-14 rounded-full bg-neutral-100 text-neutral-900 shadow-lg shadow-black/50 transition-transform hover:scale-105"
+      className="safe-bottom-fixed fixed right-4 z-50 size-14 rounded-full bg-neutral-100 text-neutral-900 shadow-lg shadow-black/50 transition-transform hover:scale-105 sm:right-8 sm:bottom-8"
       aria-label="Create new habit"
     >
       <Plus className="size-6" />
