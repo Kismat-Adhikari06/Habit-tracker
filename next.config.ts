@@ -11,6 +11,11 @@ import type { NextConfig } from "next";
  * Production is unaffected: this only applies to `next dev`.
  */
 const nextConfig: NextConfig = {
+  // Disable the small N badge in the bottom-left corner during development.
+  // Compile/runtime errors still surface normally — only the overlay badge is removed.
+  devIndicators: false,
+
+  // Allow the phone (same Wi-Fi) to load Next dev resources from the laptop.
   allowedDevOrigins: [
     "192.168.*.*", // typical home Wi-Fi
     "10.*.*.*", // 10.0.0.0/8
