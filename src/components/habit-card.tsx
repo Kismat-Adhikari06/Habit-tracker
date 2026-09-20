@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Flame } from "lucide-react";
+import { Flame, Loader2, RefreshCw } from "lucide-react";
 import { ActivityHeatmap } from "@/components/activity-heatmap";
 import { HabitIcon } from "@/components/habit-icon";
 import { HabitDetailDialog } from "@/components/habit-detail-dialog";
+import { syncGitHubContributionsAction } from "@/app/github-actions";
 import type { HabitWithStatsDTO } from "@/app/actions";
 
 type Props = {
@@ -16,6 +17,16 @@ const LEVEL_PERCENT = [0, 25, 44, 63, 100];
 
 export function HabitCard({ habit, refetch }: Props) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const isGitHubHabit = habit.name === "GitHub Activity";
+
+  async function handleSync() {
+    if (syncing) return;
+    setSyncing(true);
+    await syncGitHubContributionsAction();
+    setSyncing(false);
+    refetch();
+  }
   const { name, icon, color, unit, currentStreak, longestStreak, total, heatmap, runningTimer } = habit;
 
   const timerActiveHere = runningTimer != null;
@@ -55,6 +66,19 @@ export function HabitCard({ habit, refetch }: Props) {
                 <span className="size-1.5 animate-pulse rounded-full" style={{ backgroundColor: color }} />
                 {timerElapsedMin}m
               </span>
+            )}
+            {isGitHubHabit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSync();
+                }}
+                aria-label="Sync GitHub contributions"
+                title="Sync GitHub contributions"
+                className="ml-1 flex size-6 items-center justify-center rounded-full border border-neutral-800 text-neutral-500 transition-colors hover:border-neutral-600 hover:text-neutral-200"
+              >
+                {syncing ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+              </button>
             )}
           </div>
 

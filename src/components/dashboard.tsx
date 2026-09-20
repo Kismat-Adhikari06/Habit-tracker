@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Flame } from "lucide-react";
+import Link from "next/link";
+import { Flame, Settings } from "lucide-react";
 import { HabitCard } from "@/components/habit-card";
 import { ViewToggle } from "@/components/view-toggle";
 import { CreateHabitDialog } from "@/components/create-habit-dialog";
@@ -73,7 +74,16 @@ export function Dashboard({ initialHabits, initialMode }: Props) {
           </div>
         </div>
 
-        <ViewToggle value={mode} onChange={setMode} />
+        <div className="flex items-center gap-3">
+          <ViewToggle value={mode} onChange={setMode} />
+          <Link
+            href="/settings"
+            aria-label="Settings"
+            className="flex size-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900/80 text-neutral-400 transition-colors hover:text-neutral-200"
+          >
+            <Settings className="size-4" />
+          </Link>
+        </div>
       </header>
 
       <main className="flex flex-col gap-4">
