@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Habit {
+  id           String   @id @default(cuid())
+  name         String
+  icon         String // lucide icon name
+  color        String // hex accent color
+  trackingType String // duration | distance | quantity | boolean
+  unit         String // min, hr, km, mi, L, ml, pages, done, ...
+  target       Float? // optional daily target in the habit's unit
+  createdAt    DateTime @default(now())
+
+  activityEntries ActivityEntry[]
+  timerSessions   TimerSession[]
+
+  @@map("habits")
+}
+
+model ActivityEntry {
+  id        String   @id @default(cuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date      DateTime // day stored at UTC midnight
+  value     Float // amount of activity that day
+  createdAt DateTime @default(now())
+
+  @@unique([habitId, date])
+  @@index([habitId, date])
+  @@map("activity_entries")
+}
+
+model TimerSession {
+  id        String   @id @default(cuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  startedAt DateTime
+  endedAt   DateTime? // null while running
+  duration  Float? // minutes; set when the session ends
+
+  @@index([habitId, startedAt])
+  @@map("timer_sessions")
+}
