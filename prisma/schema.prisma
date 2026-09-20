@@ -7,6 +7,31 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String // scrypt hash, never plaintext
+  createdAt    DateTime @default(now())
+
+  sessions         Session[]
+  habits           Habit[]
+  githubConnection GitHubConnection?
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique // sha-256 of the cookie token; raw token never stored
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("sessions")
+}
+
 model Habit {
   id           String   @id @default(cuid())
   name         String
@@ -15,11 +40,14 @@ model Habit {
   trackingType String // duration | distance | quantity | boolean
   unit         String // min, hr, km, mi, L, ml, pages, done, ...
   target       Float? // optional daily target in the habit's unit
+  userId       String? // nullable during migration; assigned on account claim
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
 
   activityEntries ActivityEntry[]
   timerSessions   TimerSession[]
 
+  @@index([userId])
   @@map("habits")
 }
 
@@ -54,6 +82,8 @@ model GitHubConnection {
   encryptedToken String // AES-256-GCM ciphertext (never plaintext)
   iv             String // base64 initialization vector
   authTag        String // base64 auth tag
+  userId         String? @unique // nullable during migration; assigned on account claim
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
