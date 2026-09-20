@@ -6,6 +6,7 @@ import { toISODate, utcMidnight, type Habit, type HabitEntry } from "@/lib/habit
 import type { ViewMode } from "@/lib/habits";
 import { buildHeatmapForMode, computeCurrentStreak, computeLongestStreak, type AggregatedHeatmap } from "@/lib/habits";
 import type { TrackingType } from "@/lib/types";
+import { getSessionUser, requireUser } from "@/lib/auth";
 
 // ---- DTOs shared with client components ----
 
@@ -33,12 +34,19 @@ export type HabitWithStatsDTO = HabitDTO & {
 // ---- Queries (called from server components) ----
 
 export async function getHabits(mode: ViewMode = "yearly"): Promise<HabitWithStatsDTO[]> {
+  const user = await getSessionUser();
   const [habits, runningSessions] = await Promise.all([
     prisma.habit.findMany({
+      where: user ? { userId: user.id } : { userId: null },
       include: { activityEntries: { orderBy: { date: "asc" } } },
       orderBy: { createdAt: "asc" },
     }),
-    prisma.timerSession.findMany({ where: { endedAt: null } }),
+    prisma.timerSession.findMany({
+      where: {
+        endedAt: null,
+        habit: user ? { userId: user.id } : { userId: null },
+      },
+    }),
   ]);
 
   const runningByHabit = new Map(runningSessions.map((s) => [s.habitId, s]));
@@ -85,6 +93,7 @@ export async function createHabitAction(input: {
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     if (!input.name.trim()) return { ok: false, error: "Name is required" };
+    const user = await requireUser();
     await prisma.habit.create({
       data: {
         name: input.name.trim(),
@@ -93,6 +102,7 @@ export async function createHabitAction(input: {
         trackingType: input.trackingType,
         unit: input.unit.trim() || "done",
         target: input.target && input.target > 0 ? input.target : null,
+        userId: user.id,
       },
     });
     revalidatePath("/");
@@ -111,6 +121,10 @@ export async function addActivityAction(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     if (!Number.isFinite(amount) || amount === 0) return { ok: false, error: "Invalid amount" };
+    const user = await requireUser();
+    // Ownership check: the habit must belong to the session user.
+    const owned = await prisma.habit.findFirst({ where: { id: habitId, userId: user.id } });
+    if (!owned) return { ok: false, error: "Habit not found" };
     const iso = date ?? toISODate(new Date());
     const day = utcMidnight(new Date(iso + "T00:00:00Z"));
 
@@ -134,6 +148,9 @@ export async function setActivityAction(
   date?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    const user = await requireUser();
+    const owned = await prisma.habit.findFirst({ where: { id: habitId, userId: user.id } });
+    if (!owned) return { ok: false, error: "Habit not found" };
     const iso = date ?? toISODate(new Date());
     const day = utcMidnight(new Date(iso + "T00:00:00Z"));
 
@@ -157,6 +174,9 @@ export async function setActivityAction(
 /** Boolean habits: toggle today's completion. */
 export async function toggleTodayAction(habitId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    const user = await requireUser();
+    const owned = await prisma.habit.findFirst({ where: { id: habitId, userId: user.id } });
+    if (!owned) return { ok: false, error: "Habit not found" };
     const iso = toISODate(new Date());
     const day = utcMidnight(new Date(iso + "T00:00:00Z"));
     const existing = await prisma.activityEntry.findUnique({
@@ -179,11 +199,16 @@ export async function fetchHabitsClient(mode: ViewMode): Promise<HabitWithStatsD
 
 export async function startTimerAction(habitId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    // Single timer at a time: close any other running sessions without logging
+    const user = await requireUser();
+    // Single timer at a time (within the user's habits): close any of their
+    // running sessions without logging.
     await prisma.timerSession.updateMany({
-      where: { endedAt: null },
+      where: { endedAt: null, habit: { userId: user.id } },
       data: { endedAt: new Date() },
     });
+    // Ownership check before creating a session.
+    const owned = await prisma.habit.findFirst({ where: { id: habitId, userId: user.id } });
+    if (!owned) return { ok: false, error: "Habit not found" };
     await prisma.timerSession.create({ data: { habitId, startedAt: new Date() } });
     revalidatePath("/");
     return { ok: true };
@@ -196,7 +221,10 @@ export async function startTimerAction(habitId: string): Promise<{ ok: true } | 
 /** Stop the running session, persist it, and log its minutes as activity. */
 export async function stopTimerAction(): Promise<{ ok: true; minutes?: number } | { ok: false; error: string }> {
   try {
-    const running = await prisma.timerSession.findFirst({ where: { endedAt: null } });
+    const user = await requireUser();
+    const running = await prisma.timerSession.findFirst({
+      where: { endedAt: null, habit: { userId: user.id } },
+    });
     if (!running) return { ok: false, error: "No running timer" };
 
     const endedAt = new Date();
@@ -221,8 +249,9 @@ export async function stopTimerAction(): Promise<{ ok: true; minutes?: number } 
 /** Discard the running session without logging activity. */
 export async function discardTimerAction(): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    const user = await requireUser();
     await prisma.timerSession.updateMany({
-      where: { endedAt: null },
+      where: { endedAt: null, habit: { userId: user.id } },
       data: { endedAt: new Date(), duration: 0 },
     });
     revalidatePath("/");

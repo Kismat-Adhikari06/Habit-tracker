@@ -11,9 +11,9 @@ type Connection = {
   token: string;
 };
 
-/** Load the stored connection and decrypt the token in memory only. */
-export async function getConnection(): Promise<Connection | null> {
-  const row = await prisma.gitHubConnection.findFirst();
+/** Load a user's stored connection and decrypt the token in memory only. */
+export async function getConnection(userId: string): Promise<Connection | null> {
+  const row = await prisma.gitHubConnection.findUnique({ where: { userId } });
   if (!row) return null;
   try {
     const token = decrypt({ encryptedToken: row.encryptedToken, iv: row.iv, authTag: row.authTag });
@@ -89,16 +89,16 @@ export async function fetchContributions(token: string, username: string): Promi
   );
 }
 
-/** Encrypt + upsert the connection row. */
-export async function saveConnection(username: string, token: string) {
+/** Encrypt + upsert the connection row for a user. */
+export async function saveConnection(userId: string, username: string, token: string) {
   const enc = encrypt(token);
   await prisma.gitHubConnection.upsert({
-    where: { username },
-    create: { username, ...enc },
-    update: { ...enc, updatedAt: new Date() },
+    where: { userId },
+    create: { userId, username, ...enc },
+    update: { ...enc, username, updatedAt: new Date() },
   });
 }
 
-export async function deleteConnection() {
-  await prisma.gitHubConnection.deleteMany();
+export async function deleteConnection(userId: string) {
+  await prisma.gitHubConnection.deleteMany({ where: { userId } });
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { validateCredentials, saveConnection, deleteConnection, fetchContributions, getConnection } from "@/lib/github";
 import { toISODate, utcMidnight } from "@/lib/habits";
+import { getSessionUser, requireUser } from "@/lib/auth";
 
 export type GitHubStatus = {
   connected: boolean;
@@ -12,7 +13,9 @@ export type GitHubStatus = {
 };
 
 export async function getGitHubStatus(): Promise<GitHubStatus> {
-  const row = await prisma.gitHubConnection.findFirst();
+  const user = await getSessionUser();
+  if (!user) return { connected: false };
+  const row = await prisma.gitHubConnection.findUnique({ where: { userId: user.id } });
   if (!row) return { connected: false };
   return { connected: true, username: row.username, lastSyncedAt: row.updatedAt.toISOString() };
 }
@@ -22,6 +25,7 @@ export async function connectGitHubAction(
   token: string
 ): Promise<{ ok: true; username: string } | { ok: false; error: string }> {
   try {
+    const user = await requireUser();
     const name = username.trim().replace(/^@/, "");
     if (!name || !token.trim()) {
       return { ok: false, error: "Username and token are required." };
@@ -34,7 +38,7 @@ export async function connectGitHubAction(
     }
 
     // 2. Encrypt and persist — the plaintext token never leaves this server scope
-    await saveConnection(valid.login, token.trim());
+    await saveConnection(user.id, valid.login, token.trim());
     revalidatePath("/settings");
     revalidatePath("/");
     return { ok: true, username: valid.login };
@@ -47,7 +51,8 @@ export async function connectGitHubAction(
 
 export async function disconnectGitHubAction(): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    await deleteConnection();
+    const user = await requireUser();
+    await deleteConnection(user.id);
     revalidatePath("/settings");
     revalidatePath("/");
     return { ok: true };
@@ -65,14 +70,15 @@ export async function syncGitHubContributionsAction(): Promise<
   { ok: true; synced: number } | { ok: false; error: string }
 > {
   try {
-    const conn = await getConnection();
+    const user = await requireUser();
+    const conn = await getConnection(user.id);
     if (!conn) return { ok: false, error: "GitHub is not connected." };
 
     const days = await fetchContributions(conn.token, conn.username);
     if (days.length === 0) return { ok: true, synced: 0 };
 
     const habit = await prisma.habit.findFirst({
-      where: { name: "GitHub Activity" },
+      where: { name: "GitHub Activity", userId: user.id },
     });
     if (!habit) return { ok: false, error: "No 'GitHub Activity' habit found. Create one first." };
 
@@ -100,7 +106,10 @@ export async function syncGitHubContributionsAction(): Promise<
     );
 
     // Record sync time
-    await prisma.gitHubConnection.updateMany({ data: { updatedAt: new Date() } });
+    await prisma.gitHubConnection.update({
+      where: { userId: user.id },
+      data: { updatedAt: new Date() },
+    });
     revalidatePath("/");
     return { ok: true, synced: fresh.length };
   } catch (e) {
