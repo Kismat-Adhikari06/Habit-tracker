@@ -9,7 +9,10 @@
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts",
     "db:push": "prisma migrate dev",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "dev:mobile": "node scripts/dev-lan.mjs",
+    "dev:https": "next dev -H 0.0.0.0 --experimental-https",
+    "icons": "node scripts/generate-pwa-icons.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
