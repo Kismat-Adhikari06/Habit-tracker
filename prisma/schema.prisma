@@ -47,3 +47,15 @@ model TimerSession {
   @@index([habitId, startedAt])
   @@map("timer_sessions")
 }
+
+model GitHubConnection {
+  id             String   @id @default(cuid())
+  username       String   @unique
+  encryptedToken String // AES-256-GCM ciphertext (never plaintext)
+  iv             String // base64 initialization vector
+  authTag        String // base64 auth tag
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("github_connections")
+}
