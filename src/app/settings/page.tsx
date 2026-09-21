@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import QRCode from "qrcode";
-import { ArrowLeft, GitBranch, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Download, GitBranch, ShieldCheck } from "lucide-react";
 import { GitHubSettings } from "@/components/github-settings";
 import { getGitHubStatus } from "@/app/github-actions";
 import { getSessionUser } from "@/lib/auth";
 import { getLanAppUrl } from "@/app/app-url";
 import { AccountSection } from "@/components/account-section";
 import { OpenOnPhone, OpenOnPhoneHeader } from "@/components/open-on-phone";
+import { InstallAppCard } from "@/components/install-app-card";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,21 @@ export default async function SettingsPage() {
               — no scopes are needed to read your contribution calendar.
             </p>
           </div>
+        </section>
+
+        {/* Install App */}
+        <section className="rounded-xl border border-neutral-800/70 bg-neutral-900/60 p-5">
+          <div className="mb-1 flex items-center gap-2.5">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-orange-500/10 text-orange-400">
+              <Download className="size-4" />
+            </span>
+            <h2 className="text-sm font-semibold text-neutral-100">Install App</h2>
+          </div>
+          <p className="mb-5 text-xs text-neutral-500">
+            Install Habit Activity on your home screen for a full-screen standalone app — no address
+            bar, opens just like a native app. Works on Android, iPhone, and desktop.
+          </p>
+          <InstallAppCard />
         </section>
 
         {/* Open on Phone */}

@@ -39,8 +39,11 @@ body {
   bottom: calc(2rem + env(safe-area-inset-bottom));
 }
 
-/* Prevent horizontal overflow on narrow screens from heatmap min-widths */
-html,
-body {
-  overflow-x: hidden;
+/* ---- Heatmap scroll styling ----------------------------------------- */
+.heatmap-scroll {
+  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.heatmap-scroll::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
 }

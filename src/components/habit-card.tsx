@@ -41,7 +41,7 @@ export function HabitCard({ habit, refetch }: Props) {
         tabIndex={0}
         onClick={() => setDetailOpen(true)}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setDetailOpen(true)}
-        className="cursor-pointer rounded-xl border border-neutral-800/70 bg-neutral-900/60 p-4 transition-colors hover:border-neutral-700/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-600"
+        className="cursor-pointer overflow-hidden rounded-xl border border-neutral-800/70 bg-neutral-900/60 p-4 transition-colors hover:border-neutral-700/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-600"
       >
         {/* Header row: identity left, stats right */}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -82,7 +82,7 @@ export function HabitCard({ habit, refetch }: Props) {
             )}
           </div>
 
-          <div className="flex items-center gap-4 text-xs">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs">
             <span className="flex items-center gap-1.5 text-neutral-400">
               <Flame className="size-3.5" style={{ color }} />
               <span className="font-semibold tabular-nums text-neutral-200">{currentStreak}</span>
