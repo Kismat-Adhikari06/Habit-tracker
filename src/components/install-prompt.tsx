@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Share, Download, Smartphone } from "lucide-react";
+import { Download, Share, Smartphone, CheckCircle2, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 type BeforeInstallPromptEvent = Event & {
@@ -31,20 +32,25 @@ const DISMISS_KEY = "pwa-install-dismissed";
 export function InstallPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(true);
-  const [showIOSHint, setShowIOSHint] = useState(false);
+  const [showIOSSteps, setShowIOSSteps] = useState(false);
   const [dismissed, setDismissed] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     setInstalled(isStandalone());
-    setDismissed(localStorage.getItem(DISMISS_KEY) === "1");
+    const alreadyDismissed = localStorage.getItem(DISMISS_KEY) === "1";
+    setDismissed(alreadyDismissed);
 
     const onPrompt = (e: Event) => {
-      e.preventDefault(); // suppress the browser's own mini-infobar spam
+      e.preventDefault(); // suppress the browser's own mini-infobar
       setDeferred(e as BeforeInstallPromptEvent);
+      // Auto-open the modal once per visit unless previously dismissed.
+      if (!alreadyDismissed) setModalOpen(true);
     };
     const onInstalled = () => {
       setInstalled(true);
       setDeferred(null);
+      setModalOpen(false);
     };
 
     window.addEventListener("beforeinstallprompt", onPrompt);
@@ -55,76 +61,88 @@ export function InstallPrompt() {
     };
   }, []);
 
-  // Never render once installed/running standalone, or if the user
-  // dismissed the hint on this device.
   if (installed || dismissed) return null;
+
+  function dismiss() {
+    localStorage.setItem(DISMISS_KEY, "1");
+    setDismissed(true);
+    setModalOpen(false);
+  }
 
   async function handleInstall() {
     if (!deferred) return;
     await deferred.prompt();
     const { outcome } = await deferred.userChoice;
-    if (outcome === "accepted") setInstalled(true);
+    if (outcome === "accepted") {
+      setInstalled(true);
+      setModalOpen(false);
+    }
     setDeferred(null); // the event is single-use
   }
 
-  function handleDismiss() {
-    localStorage.setItem(DISMISS_KEY, "1");
-    setDismissed(true);
-  }
+  return (
+    <Dialog open={modalOpen} onOpenChange={(open) => { setModalOpen(open); if (!open) dismiss(); }}>
+      <DialogContent className="max-w-sm rounded-2xl border-neutral-800 bg-neutral-900 p-6">
+        <DialogHeader>
+          <span className="mx-auto mb-2 flex size-14 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-400 ring-1 ring-orange-500/25">
+            <Download className="size-7" />
+          </span>
+          <DialogTitle className="text-center text-lg font-semibold text-neutral-50">
+            Install Habit Activity
+          </DialogTitle>
+          <DialogDescription className="text-center text-sm leading-relaxed text-neutral-400">
+            Add the app to your home screen for a full-screen experience — no address bar, works like a
+            native app.
+          </DialogDescription>
+        </DialogHeader>
 
-  // Chromium/Android: native prompt is available.
-  if (deferred) {
-    return (
-      <div className="mx-auto mb-6 flex max-w-md items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-900/80 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Download className="size-4 text-orange-400" />
-          <p className="text-sm text-neutral-300">Install Habit Activity</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={handleInstall} className="h-8 bg-neutral-100 text-neutral-900 hover:bg-neutral-200">
-            Install
-          </Button>
-          <button
-            onClick={handleDismiss}
-            aria-label="Dismiss install suggestion"
-            className="px-1 text-xs text-neutral-500 hover:text-neutral-300"
+        {/* Android / Chromium: real native install prompt. */}
+        {deferred ? (
+          <Button
+            onClick={handleInstall}
+            className="mt-2 h-11 w-full bg-neutral-100 text-neutral-900 hover:bg-neutral-200"
           >
-            Later
-          </button>
-        </div>
-      </div>
-    );
-  }
+            <Download className="size-4" />
+            Install App
+          </Button>
+        ) : isIOS() && !showIOSSteps ? (
+          <Button
+            onClick={() => setShowIOSSteps(true)}
+            className="mt-2 h-11 w-full bg-neutral-100 text-neutral-900 hover:bg-neutral-200"
+          >
+            <Smartphone className="size-4" />
+            How to install on iPhone
+          </Button>
+        ) : isIOS() && showIOSSteps ? (
+          <ol className="mt-2 space-y-2 rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-sm text-neutral-300">
+            <li className="flex gap-2">
+              <span className="flex size-5 flex-shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[11px] font-semibold text-neutral-300">1</span>
+              Tap the <Share className="inline size-4 -translate-y-px" /> <strong>Share</strong> button in Safari
+            </li>
+            <li className="flex gap-2">
+              <span className="flex size-5 flex-shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[11px] font-semibold text-neutral-300">2</span>
+              Scroll and choose <strong>Add to Home Screen</strong>
+            </li>
+            <li className="flex gap-2">
+              <span className="flex size-5 flex-shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[11px] font-semibold text-neutral-300">3</span>
+              Tap <strong>Add</strong> — the app icon appears on your home screen
+            </li>
+          </ol>
+        ) : (
+          // Chromium without beforeinstallprompt yet (SW still registering) —
+          // tell the user where to find the menu option instead of a dead button.
+          <p className="mt-2 rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-center text-sm text-neutral-400">
+            Tap Chrome&apos;s menu <strong>⋮</strong> → <strong>Install app</strong>
+          </p>
+        )}
 
-  // iOS: no programmatic install API — show a one-time hint.
-  if (isIOS() && showIOSHint) {
-    return (
-      <div className="mx-auto mb-6 max-w-md rounded-xl border border-neutral-800 bg-neutral-900/80 px-4 py-3 text-sm text-neutral-300">
-        <p className="flex items-center gap-2 font-medium">
-          <Smartphone className="size-4 text-orange-400" /> Add to Home Screen
-        </p>
-        <p className="mt-1.5 text-xs leading-relaxed text-neutral-400">
-          Tap the <Share className="inline size-3.5 -translate-y-px" /> <strong>Share</strong> button in
-          Safari, then choose <strong>Add to Home Screen</strong> to install Habit Activity as an app.
-        </p>
-        <button onClick={handleDismiss} className="mt-2 text-xs text-neutral-500 hover:text-neutral-300">
-          Got it
+        <button
+          onClick={dismiss}
+          className="mt-1 text-xs text-neutral-500 underline-offset-2 hover:text-neutral-300 hover:underline"
+        >
+          Not now
         </button>
-      </div>
-    );
-  }
-
-  // iOS before the user asks (kept behind a small, dismissible affordance via dashboard usage)
-  if (isIOS()) {
-    return (
-      <button
-        onClick={() => setShowIOSHint(true)}
-        className="mx-auto mb-4 block text-xs text-neutral-500 underline-offset-2 hover:text-neutral-300 hover:underline"
-      >
-        Install app on this device
-      </button>
-    );
-  }
-
-  return null;
+      </DialogContent>
+    </Dialog>
+  );
 }
