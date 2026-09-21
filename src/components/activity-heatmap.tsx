@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { AggregatedHeatmap } from "@/lib/habits";
 
 type Props = {
   data: AggregatedHeatmap;
-  /** base accent color, any CSS color */
   color: string;
   unit: string;
   className?: string;
@@ -22,45 +21,44 @@ function shade(hex: string, opacity: number) {
   return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
-const GAP = 3;
-
 function cellOpacity(level: number) {
   return level === 0 ? 0 : 0.25 + level * 0.19;
 }
 
 /**
- * On narrow screens, shrink cells (and drop trailing columns) so the yearly
- * grid fits without horizontal overflow. Desktop is unaffected.
+ * Compute a cell size + gap that makes `columnCount` columns fit exactly in
+ * `availableWidth`. Falls back to the default sizes when they already fit.
+ * `minSize` differs per mode: daily/weekly keep readable cells (min 12),
+ * yearly is allowed to shrink to GitHub-mobile proportions (min 3px).
  */
-function useResponsiveCellSize(isYearly: boolean, columnCount: number) {
-  const [size, setSize] = useState(isYearly ? 11 : isDailySizeFallback());
+function computeFitSize(
+  columnCount: number,
+  availableWidth: number,
+  defaultSize: number,
+  defaultGap: number,
+  minSize: number,
+): { size: number; gap: number } | null {
+  if (!availableWidth || columnCount <= 0) return null;
+  const totalDefault = columnCount * defaultSize + (columnCount - 1) * defaultGap;
+  if (totalDefault <= availableWidth) return null; // default already fits
 
-  useEffect(() => {
-    if (!isYearly) return;
-    const compute = () => {
-      // Measure the actual container width via the viewport (card ~= viewport - padding on phones)
-      const available = Math.min(document.documentElement.clientWidth, 1152) - 48; // page padding
-      const mobileAllowance = document.documentElement.clientWidth < 640 ? 76 : 0; // room for stats/legend on phones
-      const fitting = Math.floor((available - mobileAllowance - (columnCount - 1) * GAP) / columnCount);
-      setSize(Math.max(5, Math.min(11, fitting)));
-    };
-    compute();
-    window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
-  }, [isYearly, columnCount]);
-
-  return size;
-}
-
-function isDailySizeFallback() {
-  return typeof window !== "undefined" && window.innerWidth < 640 ? 14 : 18;
+  // Try shrinking the gap first, then the cell.
+  for (const gap of [defaultGap, 2, 1]) {
+    const size = Math.floor((availableWidth - (columnCount - 1) * gap) / columnCount);
+    if (size >= minSize) return { size: Math.min(defaultSize, size), gap };
+  }
+  const size = Math.max(
+    minSize,
+    Math.floor((availableWidth - (columnCount - 1) * 1) / columnCount),
+  );
+  return { size, gap: 1 };
 }
 
 export function ActivityHeatmap({ data, color, unit, className }: Props) {
   const isYearly = data.mode === "yearly";
   const isDaily = data.mode === "daily";
 
-  // Yearly: month labels derived from the grid itself.
+  // Yearly: month labels from the grid itself.
   const yearlyLabels = useMemo(() => {
     if (!isYearly) return [];
     let lastLabelCol = -99;
@@ -75,59 +73,108 @@ export function ActivityHeatmap({ data, color, unit, className }: Props) {
   }, [data.columns, isYearly]);
 
   const labels = isYearly ? yearlyLabels.map((l) => l.label) : data.labels;
-
   const showLabelsRow = !isDaily;
-  const baseCellSize = isYearly ? 11 : isDaily ? 18 : 22;
-  const cellSize = useResponsiveCellSize(isYearly, data.columns.length) || baseCellSize;
 
+  // ---------- Cell sizing ----------
+  const baseCellSize = isYearly ? 11 : isDaily ? 20 : 22;
+  const minCellSize = isYearly ? 3 : 12;
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setContainerWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const fitted =
+    containerWidth > 0
+      ? computeFitSize(data.columns.length, containerWidth, baseCellSize, 3, minCellSize)
+      : null;
+
+  const cellSize = fitted?.size ?? baseCellSize;
+  const gap = fitted?.gap ?? 3;
+
+  // Corner radius scales with the cell so tiny cells never turn into circles
+  // and big cells keep the GitHub-style subtle rounding.
+  const radius = Math.max(1, Math.min(2.5, Math.round(cellSize * 0.25 * 10) / 10));
+  const labelSize = cellSize <= 5 ? "text-[7px] leading-2" : cellSize <= 8 ? "text-[8px] leading-[9px]" : "text-[9px] leading-3";
+
+  // ---------- Render ----------
+  const labelsRow = showLabelsRow ? (
+    <div className="flex flex-shrink-0" style={{ gap, direction: "ltr" }} aria-hidden>
+      {labels.map((label, i) => (
+        <div
+          key={i}
+          className={cn("relative flex-shrink-0 text-neutral-500", labelSize)}
+          style={{ width: cellSize, height: cellSize <= 5 ? 8 : 12 }}
+        >
+          {label && <span className="absolute left-0 whitespace-nowrap">{label}</span>}
+        </div>
+      ))}
+    </div>
+  ) : null;
+
+  const gridRow = (
+    <div className="flex flex-shrink-0" style={{ gap, direction: "ltr" }}>
+      {data.columns.map((column, ci) => (
+        <div key={ci} className="flex flex-col" style={{ gap }}>
+          {column.map((day) => (
+            <div
+              key={day.date}
+              title={
+                day.value > 0
+                  ? `${day.value} ${unit}${isDaily ? "" : data.mode === "weekly" ? " this week" : ""} — ${day.date}`
+                  : `No activity — ${day.date}`
+              }
+              className="aspect-square flex-shrink-0"
+              style={{
+                width: cellSize,
+                borderRadius: radius,
+                backgroundColor:
+                  day.level === 0 ? "rgba(255,255,255,0.055)" : shade(color, cellOpacity(day.level)),
+              }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+
+  const dailyLabelsRow = isDaily ? (
+    <div className="flex flex-shrink-0" style={{ gap }} aria-hidden>
+      {labels.map((label, i) => (
+        <div
+          key={i}
+          className="flex-shrink-0 text-center text-[9px] leading-3 text-neutral-500"
+          style={{ width: cellSize }}
+        >
+          {label}
+        </div>
+      ))}
+    </div>
+  ) : null;
+
+  // Everything fits the card width by construction — no horizontal scrolling
+  // in any mode. The grid can still scroll as a safety net if measurement
+  // hasn't happened yet (first paint).
   return (
-    <div className={cn("flex min-w-0 flex-col gap-[3px]", className)}>
-      {showLabelsRow && (
-        <div className="flex" style={{ gap: GAP }} aria-hidden>
-          {labels.map((label, i) => (
-            <div key={i} className="relative h-3 text-[9px] leading-3 text-neutral-500" style={{ width: cellSize }}>
-              {label && <span className="absolute left-0 whitespace-nowrap">{label}</span>}
-            </div>
-          ))}
-        </div>
+    <div
+      ref={scrollRef}
+      className={cn(
+        "flex w-full min-w-0 flex-col overflow-x-auto overflow-y-hidden heatmap-scroll",
+        className,
       )}
-
-      <div className="flex" style={{ gap: GAP }}>
-        {data.columns.map((column, ci) => (
-          <div key={ci} className="flex flex-col" style={{ gap: GAP }}>
-            {column.map((day) => (
-              <div
-                key={day.date}
-                title={
-                  day.value > 0
-                    ? `${day.value} ${unit}${isYearly ? "" : isDaily ? "" : " this week"} — ${day.date}`
-                    : `No activity — ${day.date}`
-                }
-                className="rounded-[2.5px]"
-                style={{
-                  width: cellSize,
-                  height: cellSize,
-                  minWidth: 0,
-                  backgroundColor:
-                    day.level === 0
-                      ? "rgba(255,255,255,0.055)"
-                      : shade(color, cellOpacity(day.level)),
-                }}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
-
-      {isDaily && (
-        <div className="flex" style={{ gap: GAP }} aria-hidden>
-          {labels.map((label, i) => (
-            <div key={i} className="text-center text-[9px] leading-3 text-neutral-500" style={{ width: cellSize }}>
-              {label}
-            </div>
-          ))}
-        </div>
-      )}
+      style={{ gap }}
+    >
+      {labelsRow}
+      {gridRow}
+      {dailyLabelsRow}
     </div>
   );
 }
