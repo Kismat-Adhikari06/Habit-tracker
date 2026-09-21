@@ -45,3 +45,6 @@ next-env.d.ts
 # sqlite
 prisma/dev.db
 prisma/dev.db-journal
+
+# Local HTTPS dev certificates
+.certs/
