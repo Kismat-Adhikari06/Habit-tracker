@@ -168,6 +168,6 @@ if (useHttps && certPaths) {
 const child = spawn("npx", nextArgs, {
   stdio: "inherit",
   shell: process.platform === "win32",
-  env: { ...process.env, NEXT_DEV_HTTPS: useHttps ? "1" : "" },
+  env: { ...process.env, PWA_DEV_HTTPS: useHttps ? "1" : "" },
 });
 child.on("exit", (code) => process.exit(code ?? 0));
