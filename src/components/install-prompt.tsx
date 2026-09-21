@@ -1,65 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, Share, Smartphone, CheckCircle2, X } from "lucide-react";
+import { Download, Share, Smartphone } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
-
-function isStandalone() {
-  if (typeof window === "undefined") return false;
-  if (window.matchMedia("(display-mode: standalone)").matches) return true;
-  if (window.matchMedia("(display-mode: minimal-ui)").matches) return true;
-  // iOS Safari
-  return (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-}
+import { useInstallState } from "@/lib/use-install";
 
 function isIOS() {
   if (typeof navigator === "undefined") return false;
   return (
     /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-    // iPadOS 13+ reports as Mac with touch support
     (/Macintosh/i.test(navigator.userAgent) && "maxTouchPoints" in navigator && navigator.maxTouchPoints > 1)
   );
 }
 
 const DISMISS_KEY = "pwa-install-dismissed";
 
+/**
+ * Auto-opening install modal. Pops up once (unless previously dismissed)
+ * when the native install prompt becomes available. The header Install
+ * button (InstallButton) shares the same install event via useInstallState.
+ */
 export function InstallPrompt() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(true);
+  const { canInstall, installed, promptInstall } = useInstallState();
   const [showIOSSteps, setShowIOSSteps] = useState(false);
   const [dismissed, setDismissed] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [autoShown, setAutoShown] = useState(false);
 
   useEffect(() => {
-    setInstalled(isStandalone());
-    const alreadyDismissed = localStorage.getItem(DISMISS_KEY) === "1";
-    setDismissed(alreadyDismissed);
-
-    const onPrompt = (e: Event) => {
-      e.preventDefault(); // suppress the browser's own mini-infobar
-      setDeferred(e as BeforeInstallPromptEvent);
-      // Auto-open the modal once per visit unless previously dismissed.
-      if (!alreadyDismissed) setModalOpen(true);
-    };
-    const onInstalled = () => {
-      setInstalled(true);
-      setDeferred(null);
-      setModalOpen(false);
-    };
-
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
+    setDismissed(localStorage.getItem(DISMISS_KEY) === "1");
   }, []);
+
+  // Auto-open once per visit when the prompt becomes available.
+  useEffect(() => {
+    if (canInstall && !installed && !dismissed && !autoShown) {
+      setModalOpen(true);
+      setAutoShown(true);
+    }
+  }, [canInstall, installed, dismissed, autoShown]);
 
   if (installed || dismissed) return null;
 
@@ -70,14 +49,8 @@ export function InstallPrompt() {
   }
 
   async function handleInstall() {
-    if (!deferred) return;
-    await deferred.prompt();
-    const { outcome } = await deferred.userChoice;
-    if (outcome === "accepted") {
-      setInstalled(true);
-      setModalOpen(false);
-    }
-    setDeferred(null); // the event is single-use
+    await promptInstall();
+    setModalOpen(false);
   }
 
   return (
@@ -96,8 +69,7 @@ export function InstallPrompt() {
           </DialogDescription>
         </DialogHeader>
 
-        {/* Android / Chromium: real native install prompt. */}
-        {deferred ? (
+        {canInstall ? (
           <Button
             onClick={handleInstall}
             className="mt-2 h-11 w-full bg-neutral-100 text-neutral-900 hover:bg-neutral-200"
@@ -128,13 +100,7 @@ export function InstallPrompt() {
               Tap <strong>Add</strong> — the app icon appears on your home screen
             </li>
           </ol>
-        ) : (
-          // Chromium without beforeinstallprompt yet (SW still registering) —
-          // tell the user where to find the menu option instead of a dead button.
-          <p className="mt-2 rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-center text-sm text-neutral-400">
-            Tap Chrome&apos;s menu <strong>⋮</strong> → <strong>Install app</strong>
-          </p>
-        )}
+        ) : null}
 
         <button
           onClick={dismiss}
