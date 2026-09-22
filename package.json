@@ -13,10 +13,15 @@
     "dev:mobile": "node scripts/dev-lan.mjs",
     "dev:mobile:https": "node scripts/dev-lan.mjs --https",
     "dev:https": "next dev -H 0.0.0.0 --experimental-https",
+    "cap:sync": "npx cap sync android",
+    "apk:debug": "npx cap sync android && cd android && ./gradlew assembleDebug",
     "icons": "node scripts/generate-pwa-icons.mjs",
     "test:e2e": "node scripts/e2e-auth-test.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@prisma/client": "^6.19.3",
     "@radix-ui/react-dialog": "^1.1.23",
     "class-variance-authority": "^0.7.1",

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+      Dev mode: trust user-installed CA certificates (so the mkcert rootCA
+      the user installed on the phone validates this repo's https LAN server)
+      and allow cleartext for plain-http LAN servers.
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
