@@ -10,6 +10,7 @@ import { NewHabitButton } from "@/components/new-habit-button";
 import { InstallPrompt } from "@/components/install-prompt";
 import { InstallButton } from "@/components/install-button";
 import { OfflineBanner } from "@/components/offline-banner";
+import { PhoneUsageSync } from "@/components/phone-usage-sync";
 import { toISODate, type ViewMode } from "@/lib/habits";
 import type { HabitWithStatsDTO } from "@/app/actions";
 
@@ -62,6 +63,7 @@ export function Dashboard({ initialHabits, initialMode }: Props) {
   return (
     <div className="safe-top mx-auto w-full max-w-6xl overflow-hidden px-4 py-6 sm:px-6 sm:py-10">
       <OfflineBanner />
+      <PhoneUsageSync onSynced={refetch} />
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4 sm:mb-8">
         <div className="flex items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/20">
@@ -81,6 +83,7 @@ export function Dashboard({ initialHabits, initialMode }: Props) {
         <div className="flex items-center gap-2 sm:gap-3">
           <InstallButton />
           <ViewToggle value={mode} onChange={setMode} />
+          <NewHabitButton onClick={() => setCreateOpen(true)} />
           <Link
             href="/settings"
             aria-label="Settings"
@@ -105,7 +108,6 @@ export function Dashboard({ initialHabits, initialMode }: Props) {
       </main>
 
       <CreateHabitDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refetch} />
-      <NewHabitButton onClick={() => setCreateOpen(true)} />
     </div>
   );
 }
