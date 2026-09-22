@@ -34,9 +34,13 @@ export type HeatmapDay = {
   value: number;
   /** 0 = no activity, 1..4 = intensity level */
   level: 0 | 1 | 2 | 3 | 4;
+  /** True for slots that should never show activity: dates beyond today, or
+   *  dates before a budget habit started. Rendered as empty/inactive cells. */
+  inactive?: boolean;
 };
 
 const DAYS = 366; // ~12 months of heatmap history
+const WEEKS = Math.floor(DAYS / 7); // full columns in a ~12-month 7-row grid (52)
 
 export type ViewMode = "daily" | "weekly" | "yearly";
 
@@ -50,30 +54,38 @@ export function toISODate(d: Date): string {
 
 /**
  * Build a column-major grid of weeks (like GitHub): each column is a week,
- * each row is a weekday (Mon..Sun), ending on today.
+ * each row is a weekday (Mon..Sun). The grid spans the full ~12-month window
+ * and stays rectangular — dates beyond today are still drawn as empty,
+ * inactive boxes (no activity, no effect on streaks or totals).
  */
 export function buildHeatmap(entries: HabitEntry[]): { weeks: HeatmapDay[][]; days: HeatmapDay[] } {
   const byDate = new Map(entries.map((e) => [e.date, e.value]));
   const today = utcMidnight(new Date());
+  const todayIso = toISODate(today);
 
   // Align the end to a Saturday so the last week column is full
   const end = new Date(today);
   end.setUTCDate(end.getUTCDate() + (6 - end.getUTCDay()));
 
+  // Start exactly WEEKS*7 days before `end` so every grid position up to and
+  // including the final Saturday is generated.
   const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - (DAYS - 1));
+  start.setUTCDate(start.getUTCDate() - (WEEKS * 7 - 1));
 
   const weeks: HeatmapDay[][] = [];
   const days: HeatmapDay[] = [];
 
-  for (let w = 0; w < DAYS / 7; w++) {
+  for (let w = 0; w < WEEKS; w++) {
     const week: HeatmapDay[] = [];
     for (let d = 0; d < 7; d++) {
       const date = new Date(start);
       date.setUTCDate(start.getUTCDate() + w * 7 + d);
       const iso = toISODate(date);
-      const value = byDate.get(iso) ?? 0;
-      const day: HeatmapDay = { date: iso, value, level: 0 };
+      // Days that haven't arrived yet keep their grid slot as an empty,
+      // inactive square so the whole year stays complete and rectangular.
+      const isFuture = iso > todayIso;
+      const value = isFuture ? 0 : byDate.get(iso) ?? 0;
+      const day: HeatmapDay = { date: iso, value, level: 0, inactive: isFuture ? true : undefined };
       week.push(day);
       days.push(day);
     }
@@ -83,8 +95,10 @@ export function buildHeatmap(entries: HabitEntry[]): { weeks: HeatmapDay[][]; da
   return { weeks, days };
 }
 
-/** Last ~30 days: one column per day, single row. */
-export function buildDailyHeatmap(entries: HabitEntry[], target?: number, type?: string): { columns: HeatmapDay[][]; labels: string[] } {
+/** Last ~30 days: one column per day, single row. For budget habits, days
+ *  before the budget was set (`activeFromIso`) are hidden as inactive slots,
+ *  matching the yearly view. */
+export function buildDailyHeatmap(entries: HabitEntry[], target?: number, type?: string, activeFromIso?: string): { columns: HeatmapDay[][]; labels: string[] } {
   const byDate = new Map(entries.map((e) => [e.date, e.value]));
   const today = utcMidnight(new Date());
   const days = 30;
@@ -97,7 +111,13 @@ export function buildDailyHeatmap(entries: HabitEntry[], target?: number, type?:
     const date = new Date(today);
     date.setUTCDate(date.getUTCDate() - i);
     const iso = toISODate(date);
-    const day: HeatmapDay = { date: iso, value: byDate.get(iso) ?? 0, level: 0 };
+    const beforeBudget = activeFromIso ? iso < activeFromIso : false;
+    const day: HeatmapDay = {
+      date: iso,
+      value: beforeBudget ? 0 : byDate.get(iso) ?? 0,
+      level: 0,
+      inactive: beforeBudget ? true : undefined,
+    };
     columns.push([day]);
     flat.push(day);
     // Clean date label every 5 columns
@@ -108,8 +128,11 @@ export function buildDailyHeatmap(entries: HabitEntry[], target?: number, type?:
   return { columns, labels };
 }
 
-/** Last ~16 weeks: one column per week, all values aggregated. */
-export function buildWeeklyHeatmap(entries: HabitEntry[], target?: number, type?: string): { columns: HeatmapDay[][]; labels: string[] } {
+/** Last ~16 weeks: one column per week, all values aggregated. Budget habits:
+ *  days before `activeFromIso` are excluded from each week's total and any
+ *  column that falls entirely before the budget was set is inactive — matching
+ *  the yearly view where nothing counts before the budget exists. */
+export function buildWeeklyHeatmap(entries: HabitEntry[], target?: number, type?: string, activeFromIso?: string): { columns: HeatmapDay[][]; labels: string[] } {
   const weeks = 16;
   const today = utcMidnight(new Date());
 
@@ -127,22 +150,29 @@ export function buildWeeklyHeatmap(entries: HabitEntry[], target?: number, type?
   for (let w = 0; w < weeks; w++) {
     let total = 0;
     let activeDays = 0;
+    let daysBeforeBudget = 0;
     let weekStart: Date | null = null;
     for (let d = 0; d < 7; d++) {
       const date = new Date(start);
       date.setUTCDate(start.getUTCDate() + w * 7 + d);
       if (!weekStart) weekStart = date;
-      const v = byDate.get(toISODate(date)) ?? 0;
+      const iso = toISODate(date);
+      const beforeBudget = activeFromIso ? iso < activeFromIso : false;
+      if (beforeBudget) {
+        daysBeforeBudget++;
+        continue;
+      }
+      const v = byDate.get(iso) ?? 0;
       total += v;
       if (v > 0) activeDays++;
     }
-    const day: HeatmapDay = { date: toISODate(weekStart!), value: Math.round(total * 10) / 10, level: 0 };
+    const inactive = activeFromIso ? daysBeforeBudget === 7 : false;
+    const day: HeatmapDay = { date: toISODate(weekStart!), value: Math.round(total * 10) / 10, level: 0, inactive: inactive ? true : undefined };
     columns.push([day]);
     flat.push(day);
     const prev = w > 0 ? new Date(columns[w - 1][0].date + "T00:00:00Z") : null;
     const monthChanged = !prev || prev.getUTCMonth() !== weekStart!.getUTCMonth();
     labels.push(monthChanged ? MONTH_NAMES[weekStart!.getUTCMonth()] : "");
-    day.level = 0;
     // track active days for tooltip via value only; keep simple
     void activeDays;
   }
@@ -156,17 +186,28 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 /**
  * Build the aggregated heatmap for a given view mode from the same entry data.
  */
-export function buildHeatmapForMode(entries: HabitEntry[], mode: ViewMode, target?: number, type?: string): AggregatedHeatmap {
+export function buildHeatmapForMode(
+  entries: HabitEntry[],
+  mode: ViewMode,
+  target?: number,
+  type?: string,
+  activeFromIso?: string
+): AggregatedHeatmap {
   if (mode === "daily") {
-    const { columns, labels } = buildDailyHeatmap(entries, target, type);
+    const { columns, labels } = buildDailyHeatmap(entries, target, type, activeFromIso);
     return { columns, labels, mode };
   }
   if (mode === "weekly") {
-    const { columns, labels } = buildWeeklyHeatmap(entries, target, type);
+    const { columns, labels } = buildWeeklyHeatmap(entries, target, type, activeFromIso);
     return { columns, labels, mode };
   }
   const { weeks } = buildHeatmap(entries);
   const days = weeks.flat();
+  // Budget habits: nothing counts before the budget was set — those slots are
+  // inactive (empty grid) until the user picks their daily budget.
+  if (activeFromIso) {
+    for (const day of days) if (day.date < activeFromIso) day.inactive = true;
+  }
   computeLevels(days, target, type);
   return { columns: weeks, labels: [], mode };
 }
@@ -175,12 +216,22 @@ export function buildHeatmapForMode(entries: HabitEntry[], mode: ViewMode, targe
  * Intensity level from progress toward the habit's daily target:
  * 0% empty · 1–25% light · 26–50% medium-light · 51–75% medium ·
  * 76%+ strongest. Boolean habits: incomplete = empty, complete = full.
+ *
+ * Budget habits are INVERTED: the value is minutes used and the target is
+ * the daily cap, so less usage is better. Zero/well-under-budget = brightest
+ * (level 4), creeping toward/over the budget fades to level 1.
  */
 export function levelForValue(value: number, target?: number, type?: string): 0 | 1 | 2 | 3 | 4 {
-  if (value <= 0) return 0;
+  if (value <= 0) return type === "budget" ? 4 : 0;
   if (type === "boolean") return 4;
   if (!target || target <= 0) return 4;
   const ratio = value / target;
+  if (type === "budget") {
+    if (ratio <= 0.25) return 4;
+    if (ratio <= 0.5) return 3;
+    if (ratio <= 0.76) return 2;
+    return 1;
+  }
   if (ratio >= 0.76) return 4;
   if (ratio >= 0.51) return 3;
   if (ratio >= 0.26) return 2;
@@ -192,6 +243,12 @@ export function computeLevels(days: HeatmapDay[], target?: number, type?: string
   if (type === "boolean") {
     // Boolean habits: any activity = full intensity
     for (const day of days) day.level = day.value > 0 ? 4 : 0;
+    return;
+  }
+  if (type === "budget") {
+    // Budget habits: inverted — zero/under-budget is brightest, over is dim.
+    // Inactive slots (future or before the habit started) stay empty at 0.
+    for (const day of days) day.level = day.inactive ? 0 : levelForValue(day.value, target, type);
     return;
   }
   if (target && target > 0) {

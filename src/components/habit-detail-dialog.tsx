@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Play, Square, Plus, Check, Undo2, Timer } from "lucide-react";
+import { useState } from "react";
+import { AtSign, MessageCircle, Music2, Play, Square, Plus, Check, Undo2, Timer } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -13,6 +13,7 @@ import {
   stopTimerAction,
   discardTimerAction,
   toggleTodayAction,
+  updateHabitTargetAction,
   type HabitWithStatsDTO,
 } from "@/app/actions";
 import { levelForValue } from "@/lib/habits";
@@ -48,6 +49,13 @@ const QUICK_AMOUNTS: Record<string, { label: string; amount: number }[]> = {
   ],
 };
 
+const APP_META: Record<string, { label: string; Icon: typeof MessageCircle }> = {
+  instagram: { label: "Instagram", Icon: MessageCircle },
+  youtube: { label: "YouTube", Icon: Play },
+  tiktok: { label: "TikTok", Icon: Music2 },
+  twitter: { label: "X", Icon: AtSign },
+};
+
 type Props = {
   habit: HabitWithStatsDTO | null;
   open: boolean;
@@ -60,11 +68,18 @@ type Props = {
 export function HabitDetailDialog({ habit, open, onOpenChange, timerActive, timerElapsedMin, onChanged }: Props) {
   const [manual, setManual] = useState("");
   const [saving, setSaving] = useState(false);
+  const [budget, setBudget] = useState("60");
+  const [savingBudget, setSavingBudget] = useState(false);
 
-  // Reset manual input when opening for a different habit
-  useEffect(() => {
+  // Reset the manual/budget inputs whenever a different habit opens (or the
+  // same one re-opens). Done during render so it can't race the effect.
+  const [prevKey, setPrevKey] = useState<string>("");
+  const key = `${habit?.id ?? "none"}-${open}`;
+  if (key !== prevKey) {
+    setPrevKey(key);
     setManual("");
-  }, [habit?.id, open]);
+    setBudget(habit?.target ? String(habit.target) : "");
+  }
 
   if (!habit) return null;
   const { name, icon, color, unit, trackingType: type, target } = habit;
@@ -82,6 +97,16 @@ export function HabitDetailDialog({ habit, open, onOpenChange, timerActive, time
     });
   }
 
+  function saveBudget() {
+    const amount = Number(budget);
+    if (!budget || !Number.isFinite(amount) || amount <= 0 || savingBudget) return;
+    setSavingBudget(true);
+    updateHabitTargetAction(habit!.id, amount).then((result) => {
+      setSavingBudget(false);
+      if (result.ok) onChanged();
+    });
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="border-neutral-800 bg-neutral-900 sm:max-w-sm">
@@ -96,7 +121,11 @@ export function HabitDetailDialog({ habit, open, onOpenChange, timerActive, time
             {name}
           </DialogTitle>
           <DialogDescription>
-            {type === "boolean" ? "Mark today complete" : `Today: ${today} ${unit}`}
+            {type === "boolean"
+              ? "Mark today complete"
+              : type === "budget"
+                ? `Today: ${today} of ${target ?? "—"} ${unit} used`
+                : `Today: ${today} ${unit}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -126,6 +155,40 @@ export function HabitDetailDialog({ habit, open, onOpenChange, timerActive, time
               ) : null}
             </span>
           </div>
+
+          {/* Budget: per-app breakdown for today (updates on its own via the
+              phone's UsageStats sync, every minute / on app focus) */}
+          {type === "budget" && habit.budgetStartedAt && (
+            <div className="flex flex-col gap-2">
+              <span className="text-xs uppercase tracking-wide text-neutral-500">Breakdown today</span>
+              {habit.todayApps && Object.keys(habit.todayApps).length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(habit.todayApps)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([app, minutes]) => {
+                      const meta = APP_META[app];
+                      if (!meta) return null;
+                      const Icon = meta.Icon;
+                      return (
+                        <span
+                          key={app}
+                          className="flex items-center gap-1.5 rounded-full border border-neutral-800 bg-neutral-950/60 px-2.5 py-1 text-[11px] text-neutral-300"
+                        >
+                          <Icon className="size-3.5" style={{ color }} />
+                          {meta.label}
+                          <span className="font-semibold tabular-nums text-neutral-100">{minutes}m</span>
+                        </span>
+                      );
+                    })}
+                </div>
+              ) : (
+                <p className="rounded-lg border border-dashed border-neutral-800 px-3 py-2.5 text-[11px] text-neutral-600">
+                  No social media usage recorded yet today — opens as you use Instagram,
+                  YouTube, TikTok or X.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Duration: timer */}
           {type === "duration" && (
@@ -194,7 +257,7 @@ export function HabitDetailDialog({ habit, open, onOpenChange, timerActive, time
           )}
 
           {/* Manual entry (duration / distance / quantity) */}
-          {type !== "boolean" && (
+          {type !== "boolean" && type !== "budget" && (
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <input
@@ -228,7 +291,49 @@ export function HabitDetailDialog({ habit, open, onOpenChange, timerActive, time
             </Button>
           )}
 
-          {target && type !== "boolean" && (
+          {/* Budget: set the daily social-media cap (auto-tracked habit) */}
+          {type === "budget" && (
+            <div className="flex flex-col gap-2">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                Daily budget (minutes)
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    value={budget}
+                    onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))}
+                    onKeyDown={(e) => e.key === "Enter" && saveBudget()}
+                    placeholder="e.g. 60"
+                    inputMode="numeric"
+                    className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 pr-12 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">min</span>
+                </div>
+                <Button
+                  onClick={() => void saveBudget()}
+                  disabled={savingBudget || !budget || Number(budget) === target}
+                  className="h-10 bg-neutral-100 text-neutral-900 hover:bg-neutral-300"
+                >
+                  <Check className="size-4" /> Save
+                </Button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-neutral-600">
+                Stays bright while you stay under this cap — fades as you approach or
+                exceed it. Tracking starts the moment you save.
+              </p>
+              {habit.budgetStartedAt ? (
+                <p className="text-[11px] leading-relaxed text-neutral-500">
+                  Watching since {habit.budgetStartedAt} — nothing counts before that
+                </p>
+              ) : (
+                <p className="text-[11px] leading-relaxed text-neutral-500">
+                  Not started yet — save a budget to begin tracking.
+                </p>
+              )}
+            </div>
+          )}
+
+          {target && type !== "boolean" && type !== "budget" && (
             <p className="text-center text-[11px] text-neutral-600">
               Daily target: {target} {unit} — heatmap intensity scales toward it
             </p>

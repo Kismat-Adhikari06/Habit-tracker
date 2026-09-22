@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Flame, Loader2, RefreshCw } from "lucide-react";
 import { ActivityHeatmap } from "@/components/activity-heatmap";
 import { HabitIcon } from "@/components/habit-icon";
@@ -19,6 +19,7 @@ export function HabitCard({ habit, refetch }: Props) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const isGitHubHabit = habit.name === "GitHub Activity";
+  const isBudget = habit.trackingType === "budget";
 
   async function handleSync() {
     if (syncing) return;
@@ -30,9 +31,22 @@ export function HabitCard({ habit, refetch }: Props) {
   const { name, icon, color, unit, currentStreak, longestStreak, total, heatmap, runningTimer } = habit;
 
   const timerActiveHere = runningTimer != null;
-  const timerElapsedMin = timerActiveHere
-    ? Math.max(0, Math.floor((Date.now() - (runningTimer?.startedAt ?? 0)) / 60000))
-    : 0;
+
+  // Elapsed timer minutes start at 0 on every paint so the server-rendered
+  // HTML matches the client's first paint (no Date.now() during render and no
+  // hydration mismatch); a deferred interval then ticks it up once mounted.
+  const [elapsedMin, setElapsedMin] = useState(0);
+  useEffect(() => {
+    if (!timerActiveHere) return;
+    const startedAt = runningTimer?.startedAt ?? 0;
+    const update = () => setElapsedMin(Math.max(0, Math.floor((Date.now() - startedAt) / 60000)));
+    const first = setTimeout(() => update(), 0);
+    const tick = setInterval(update, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(tick);
+    };
+  }, [timerActiveHere, runningTimer?.startedAt]);
 
   return (
     <>
@@ -59,12 +73,18 @@ export function HabitCard({ habit, refetch }: Props) {
               <h3 className="text-sm font-semibold leading-tight tracking-tight text-neutral-100">
                 {name}
               </h3>
-              <p className="text-[11px] leading-tight text-neutral-500">{unit}</p>
+              <p className="text-[11px] leading-tight text-neutral-500">
+                {isBudget
+                  ? habit.target
+                    ? `${habit.target} ${habit.unit}/day budget`
+                    : "No budget set — tap to start"
+                  : unit}
+              </p>
             </div>
             {timerActiveHere && (
               <span className="ml-1 flex items-center gap-1 rounded-full border border-neutral-700 px-2 py-0.5 text-[10px] text-neutral-400">
                 <span className="size-1.5 animate-pulse rounded-full" style={{ backgroundColor: color }} />
-                {timerElapsedMin}m
+                {elapsedMin}m
               </span>
             )}
             {isGitHubHabit && (
@@ -102,20 +122,27 @@ export function HabitCard({ habit, refetch }: Props) {
           </div>
         </div>
 
-        {/* Heatmap fills the card width */}
-        <ActivityHeatmap data={heatmap} color={color} unit={unit} />
+        {/* Heatmap fills the card width. Budget habits show nothing until the
+          user picks their daily budget — the graph starts empty on purpose. */}
+        {isBudget && !habit.budgetStartedAt ? (
+          <div className="rounded-lg border border-dashed border-neutral-800 py-8 text-center text-[11px] text-neutral-600">
+            Tap to set your daily budget — tracking starts when you do.
+          </div>
+        ) : (
+          <ActivityHeatmap data={heatmap} color={color} unit={unit} />
+        )}
 
-        {/* Footer: legend bottom-right */}
+        {/* Footer: legend bottom-right (budget habits are inverted: less = brighter) */}
         <div className="mt-2 flex items-center justify-end gap-1 text-[10px] text-neutral-500">
           <span className="mr-0.5">Less</span>
-          {LEVEL_PERCENT.map((percent, level) => (
+          {(isBudget ? [...LEVEL_PERCENT].reverse() : LEVEL_PERCENT).map((percent, level) => (
             <span
               key={level}
               className="size-[9px] rounded-[2px]"
               style={{
                 backgroundColor:
-                  level === 0
-                    ? "rgba(255,255,255,0.055)"
+                  percent === 0
+                    ? "rgba(255,255,255,0.09)"
                     : `color-mix(in srgb, ${color} ${percent}%, transparent)`,
               }}
             />
@@ -129,7 +156,7 @@ export function HabitCard({ habit, refetch }: Props) {
         open={detailOpen}
         onOpenChange={setDetailOpen}
         timerActive={timerActiveHere}
-        timerElapsedMin={timerElapsedMin}
+        timerElapsedMin={elapsedMin}
         onChanged={refetch}
       />
     </>

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { toISODate, utcMidnight, type Habit, type HabitEntry } from "@/lib/habits";
+import { toISODate, utcMidnight } from "@/lib/habits";
 import type { ViewMode } from "@/lib/habits";
 import { buildHeatmapForMode, computeCurrentStreak, computeLongestStreak, type AggregatedHeatmap } from "@/lib/habits";
 import type { TrackingType } from "@/lib/types";
@@ -18,6 +18,10 @@ export type HabitDTO = {
   trackingType: TrackingType;
   unit: string;
   target?: number;
+  /** Budget habits: tracking counts only from this date onward (null = not started). */
+  budgetStartedAt?: string | null;
+  /** Budget habits: per-app minutes today, straight from the phone's UsageStats sync. */
+  todayApps?: Record<string, number> | null;
   createdAt: string;
   entries: { date: string; value: number }[];
   /** running timer session for this habit, if any */
@@ -52,13 +56,32 @@ export async function getHabits(mode: ViewMode = "yearly"): Promise<HabitWithSta
   const runningByHabit = new Map(runningSessions.map((s) => [s.habitId, s]));
 
   return habits.map((h) => {
-    const entries: HabitEntry[] = h.activityEntries.map((e) => ({
+    const rawEntries = h.activityEntries.map((e) => ({
       date: toISODate(e.date),
       value: e.value,
     }));
 
+    // Budget habits only "exist" once the user picks their daily budget: hide
+    // everything before budgetStartedAt (and everything, if never set).
+    let entries = rawEntries;
+    let budgetStartedAt: string | null = null;
+    let activeFromIso: string | undefined;
+    if (h.trackingType === "budget") {
+      budgetStartedAt = h.budgetStartedAt ? toISODate(h.budgetStartedAt) : null;
+      const start = budgetStartedAt;
+      entries = start ? rawEntries.filter((e) => e.date >= start) : [];
+      // No budget set yet -> no sector is active; the grid stays empty.
+      activeFromIso = start ?? "9999-12-31";
+    }
+
     const target = h.target ?? undefined;
-    const habit: Habit = { id: h.id, name: h.name, icon: h.icon, color: h.color, unit: h.unit, entries };
+
+    const todayIso = toISODate(new Date());
+    const todayEntry = h.activityEntries.find((e) => toISODate(e.date) === todayIso);
+    const todayApps =
+      h.trackingType === "budget" && todayEntry?.apps && typeof todayEntry.apps === "object"
+        ? (todayEntry.apps as Record<string, number>)
+        : null;
 
     return {
       id: h.id,
@@ -68,12 +91,14 @@ export async function getHabits(mode: ViewMode = "yearly"): Promise<HabitWithSta
       trackingType: h.trackingType as TrackingType,
       unit: h.unit,
       target,
+      budgetStartedAt,
+      todayApps,
       createdAt: h.createdAt.toISOString(),
       entries,
       runningTimer: runningByHabit.has(h.id)
         ? { startedAt: runningByHabit.get(h.id)!.startedAt.getTime() }
         : null,
-      heatmap: buildHeatmapForMode(entries, mode, target, h.trackingType),
+      heatmap: buildHeatmapForMode(entries, mode, target, h.trackingType, activeFromIso),
       currentStreak: computeCurrentStreak(entries),
       longestStreak: computeLongestStreak(entries),
       total: Math.round(entries.reduce((sum, e) => sum + e.value, 0) * 100) / 100,
@@ -102,6 +127,9 @@ export async function createHabitAction(input: {
         trackingType: input.trackingType,
         unit: input.unit.trim() || "done",
         target: input.target && input.target > 0 ? input.target : null,
+        // A budget habit created with a target has effectively started tracking.
+        budgetStartedAt:
+          input.trackingType === "budget" && input.target && input.target > 0 ? new Date() : null,
         userId: user.id,
       },
     });
@@ -186,6 +214,32 @@ export async function toggleTodayAction(habitId: string): Promise<{ ok: true } |
   } catch (e) {
     console.error("toggleTodayAction failed", e);
     return { ok: false, error: "Could not toggle habit" };
+  }
+}
+
+/** Set (replace) the habit's daily target/budget. */
+export async function updateHabitTargetAction(
+  habitId: string,
+  target: number
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    if (!Number.isFinite(target) || target <= 0) return { ok: false, error: "Invalid budget" };
+    const user = await requireUser();
+    const owned = await prisma.habit.findFirst({ where: { id: habitId, userId: user.id } });
+    if (!owned) return { ok: false, error: "Habit not found" };
+    await prisma.habit.update({
+      where: { id: habitId },
+      data: {
+        target,
+        // First budget pick = the moment this habit starts being tracked.
+        budgetStartedAt: owned.trackingType === "budget" && !owned.budgetStartedAt ? new Date() : owned.budgetStartedAt,
+      },
+    });
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    console.error("updateHabitTargetAction failed", e);
+    return { ok: false, error: "Could not update budget" };
   }
 }
 
