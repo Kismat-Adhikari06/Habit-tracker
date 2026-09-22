@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Download, Share, Smartphone } from "lucide-react";
 import { useInstallState } from "@/lib/use-install";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,6 +11,16 @@ function isIOS() {
   return (
     /iphone|ipad|ipod/i.test(navigator.userAgent) ||
     (/Macintosh/i.test(navigator.userAgent) && "maxTouchPoints" in navigator && navigator.maxTouchPoints > 1)
+  );
+}
+
+/** What the server renders when it can't know the install state (https note). */
+function InsecureNotice() {
+  return (
+    <p className="text-[11px] leading-relaxed text-neutral-500">
+      To install this app you need to open it over HTTPS or localhost first. This page is currently
+      being served over plain HTTP, which browsers don&apos;t treat as installable.
+    </p>
   );
 }
 
@@ -25,6 +35,17 @@ function isIOS() {
 export function InstallAppCard() {
   const { canInstall, installed, promptInstall } = useInstallState();
   const [showIOSSteps, setShowIOSSteps] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // First paint must byte-match the server-rendered HTML (the server can't
+  // know the install/user-agent state on the client). Flip to the real state
+  // only after mount, which avoids the React hydration mismatch warning.
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!mounted) return <InsecureNotice />;
 
   if (installed) {
     return (
@@ -89,10 +110,5 @@ export function InstallAppCard() {
     );
   }
 
-  return (
-    <p className="text-[11px] leading-relaxed text-neutral-500">
-      To install this app you need to open it over HTTPS or localhost first. This page is currently
-      being served over plain HTTP, which browsers don&apos;t treat as installable.
-    </p>
-  );
+  return <InsecureNotice />;
 }

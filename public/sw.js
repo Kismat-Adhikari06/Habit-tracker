@@ -12,7 +12,7 @@
  *   request — nothing sensitive or user-specific is ever cached.
  */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `habit-activity-shell-${VERSION}`;
 const ASSET_CACHE = `habit-activity-assets-${VERSION}`;
 
