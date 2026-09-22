@@ -29,7 +29,13 @@ function cellOpacity(level: number) {
  * Compute a cell size + gap that makes `columnCount` columns fit exactly in
  * `availableWidth`. Falls back to the default sizes when they already fit.
  * `minSize` differs per mode: daily/weekly keep readable cells (min 12),
- * yearly is allowed to shrink to GitHub-mobile proportions (min 3px).
+ * yearly is allowed to shrink a bit (min 3).
+ *
+ * To make cells read as tiles instead of dots, gaps shrink FIRST — the
+ * tightest gap is tried first so the cells get the most room (cell size
+ * always dominates the gap). Any leftover pixels that don't divide evenly
+ * into whole cells are spread across the gaps, so the grid spans the card
+ * edge-to-edge instead of leaving a dead strip on the right.
  */
 function computeFitSize(
   columnCount: number,
@@ -42,16 +48,23 @@ function computeFitSize(
   const totalDefault = columnCount * defaultSize + (columnCount - 1) * defaultGap;
   if (totalDefault <= availableWidth) return null; // default already fits
 
-  // Try shrinking the gap first, then the cell.
-  for (const gap of [defaultGap, 2, 1]) {
+  // Tight gaps first, so the cells come out as large as the width allows.
+  for (const gap of [1, 2, 3]) {
     const size = Math.floor((availableWidth - (columnCount - 1) * gap) / columnCount);
-    if (size >= minSize) return { size: Math.min(defaultSize, size), gap };
+    if (size < minSize) continue;
+
+    // Spread the leftover pixels evenly across all gaps so the grid exactly
+    // spans `availableWidth` — no unused horizontal space on the right.
+    const maxSize = Math.min(defaultSize, size);
+    const used = columnCount * maxSize + (columnCount - 1) * gap;
+    const leftover = Math.max(0, availableWidth - used);
+    const balancedGap = leftover > 0 ? gap + leftover / (columnCount - 1) : gap;
+    return { size: maxSize, gap: balancedGap };
   }
-  const size = Math.max(
-    minSize,
-    Math.floor((availableWidth - (columnCount - 1) * 1) / columnCount),
-  );
-  return { size, gap: 1 };
+
+  // Too narrow for minSize even at 1px gaps: floor at the minimum; the
+  // container scrolls as a last-ditch safety net.
+  return { size: minSize, gap: 1 };
 }
 
 export function ActivityHeatmap({ data, color, unit, className }: Props) {
@@ -128,16 +141,18 @@ export function ActivityHeatmap({ data, color, unit, className }: Props) {
             <div
               key={day.date}
               title={
-                day.value > 0
-                  ? `${day.value} ${unit}${isDaily ? "" : data.mode === "weekly" ? " this week" : ""} — ${day.date}`
-                  : `No activity — ${day.date}`
+                day.inactive
+                  ? day.date
+                  : day.value > 0
+                    ? `${day.value} ${unit}${isDaily ? "" : data.mode === "weekly" ? " this week" : ""} — ${day.date}`
+                    : `No activity — ${day.date}`
               }
               className="aspect-square flex-shrink-0"
               style={{
                 width: cellSize,
                 borderRadius: radius,
                 backgroundColor:
-                  day.level === 0 ? "rgba(255,255,255,0.055)" : shade(color, cellOpacity(day.level)),
+                  day.level === 0 ? "rgba(255,255,255,0.09)" : shade(color, cellOpacity(day.level)),
               }}
             />
           ))}
