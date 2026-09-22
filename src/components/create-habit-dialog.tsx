@@ -47,6 +47,7 @@ const UNIT_SUGGESTIONS: Record<TrackingType, string[]> = {
   distance: ["km", "mi"],
   quantity: ["L", "ml", "pages", "glasses"],
   boolean: ["done"],
+  budget: ["min"],
 };
 
 type Props = {
